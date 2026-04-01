@@ -9,9 +9,9 @@
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&display=swap');
         :root { --color-bg: #F4F4F0; --color-active: #8DA47E; }
-        body { background-color: var(--color-bg); font-family: 'Noto Serif SC', serif; touch-action: none; overflow: hidden; }
+        body { background-color: var(--color-bg); font-family: 'Noto Serif SC', serif; touch-action: none; overflow: hidden; height: 100vh; height: -webkit-fill-available; }
         
-        .main-layout { display: flex; height: 100vh; transition: all 0.3s ease; }
+        .main-layout { display: flex; height: 100vh; height: -webkit-fill-available; transition: all 0.3s ease; }
         .sidebar { width: 280px; flex-shrink: 0; background: #fff; border-right: 1px solid #eee; transition: all 0.3s; z-index: 100; }
         .sidebar.collapsed { margin-left: -280px; }
         .content-area { flex-grow: 1; position: relative; display: flex; flex-direction: column; overflow: hidden; width: 100%; }
@@ -502,6 +502,16 @@
 
                 onMounted(() => {
                     reGenerate();
+                    // iOS Safari 要求在用户手势内 resume AudioContext，首次触摸时解锁
+                    const unlockAudio = () => {
+                        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        if (audioCtx.state === 'suspended') audioCtx.resume();
+                        document.removeEventListener('touchstart', unlockAudio);
+                        document.removeEventListener('mousedown', unlockAudio);
+                    };
+                    document.addEventListener('touchstart', unlockAudio, { once: true });
+                    document.addEventListener('mousedown', unlockAudio, { once: true });
+
                     window.addEventListener('resize', () => {
                         showSidebar.value = window.innerWidth > 768;
                         reGenerate();
