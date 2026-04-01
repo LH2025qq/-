@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>古诗专注力训练 v9</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&display=swap');
+        :root { --color-bg: #F4F4F0; --color-active: #8DA47E; }
+        body { background-color: var(--color-bg); font-family: 'Noto Serif SC', serif; touch-action: none; overflow: hidden; }
+        
+        .main-layout { display: flex; height: 100vh; transition: all 0.3s ease; }
+        .sidebar { width: 280px; flex-shrink: 0; background: #fff; border-right: 1px solid #eee; transition: all 0.3s; z-index: 100; }
+        .sidebar.collapsed { margin-left: -280px; }
+        .content-area { flex-grow: 1; position: relative; display: flex; flex-direction: column; overflow: hidden; width: 100%; }
+
+        /* 舒尔特网格逻辑样式 */
+        .schulte-grid { display: grid; gap: 8px; width: 100%; height: 100%; max-width: 85vh; max-height: 85vh; margin: auto; }
+        .schulte-cell { background: #fff; border-radius: 12px; border: 1px solid #eee; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1); user-select: none; box-shadow: 0 2px 4px rgba(0,0,0,0.02); }
+        
+        /* 变色模式样式 */
+        .cell-correct-color { background-color: #E2EAD9 !important; color: #5B7052; border-color: #8DA47E; }
+        /* 消失模式样式 */
+        .cell-vanished { opacity: 0; pointer-events: none; transform: scale(0.8); }
+
+        /* 治愈系结算层 */
+        .finish-overlay { position: absolute; inset: 0; background: rgba(244,244,240,0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 80; backdrop-filter: blur(10px); animation: fadeIn 0.8s ease forwards; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .zen-card { text-align: center; }
+        .zen-title { font-size: 1.8rem; color: #5B7052; letter-spacing: 0.4rem; margin-bottom: 1rem; opacity: 0; animation: slideUp 1s 0.3s ease forwards; }
+        .zen-subtitle { font-size: 1rem; color: #8DA47E; letter-spacing: 0.2rem; margin-bottom: 0.5rem; opacity: 0; animation: slideUp 1s 0.5s ease forwards; }
+        @keyframes slideUp { from { transform: translateY(30px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* 散点（连线模式用） */
+        .scatter-item { position: absolute; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 4px; pointer-events: none; }
+        .scatter-dot { width: 6px; height: 6px; background: #666; border-radius: 50%; }
+        .scatter-text { font-size: 1.1rem; color: #333; font-weight: bold; background: rgba(244,244,240,0.8); padding: 2px 4px; border-radius: 4px; }
+
+        .checkbox-custom { width: 16px; height: 16px; border: 2px solid #ddd; appearance: none; border-radius: 4px; cursor: pointer; position: relative; }
+        .checkbox-custom:checked { background: var(--color-active); border-color: var(--color-active); }
+        .checkbox-custom:checked::after { content: '✓'; color: white; font-size: 10px; position: absolute; top: -2px; left: 2px; }
+
+        /* 橡皮擦光标 */
+        .eraser-cursor { cursor: cell; }
+        .pen-cursor { cursor: crosshair; }
+
+        /* 工具栏 */
+        .tool-btn { padding: 6px 12px; border-radius: 8px; font-size: 11px; font-weight: bold; transition: all 0.2s; }
+        .tool-btn.active { background: #2d2d2d; color: #fff; }
+        .tool-btn.inactive { color: #999; background: #f5f5f5; }
+    </style>
+</head>
+<body>
+    <div id="app" class="main-layout">
+        <!-- 导入提示 -->
+        <div v-if="showImportTip" class="fixed inset-0 bg-black/50 z-[200] flex items-center justify-center p-6">
+            <div class="bg-white rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+                <h3 class="font-bold text-lg mb-1">批量导入古诗</h3>
+                <p class="text-stone-500 text-xs mb-3 leading-relaxed">格式：年级|诗名|朝代|作者|内容|朝代拼音|作者拼音|内容拼音</p>
+                <!-- 手动文本输入 -->
+                <textarea v-model="manualImportText" placeholder="直接粘贴内容，每行一首..." rows="5"
+                    class="w-full bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs outline-none resize-none mb-2 font-mono"></textarea>
+                <button @click="handleManualImport" class="w-full bg-stone-700 text-white py-2 rounded-xl font-bold text-sm mb-2">确认导入文本</button>
+                <div class="flex items-center gap-2 my-1">
+                    <div class="flex-1 h-px bg-stone-100"></div>
+                    <span class="text-[10px] text-stone-300">或</span>
+                    <div class="flex-1 h-px bg-stone-100"></div>
+                </div>
+                <button @click="triggerFileInput" class="w-full bg-stone-800 text-white py-2 rounded-xl font-bold text-sm">选择本地文件</button>
+                <button @click="showImportTip = false" class="w-full text-stone-400 py-2 mt-1 text-sm">取消</button>
+            </div>
+        </div>
+
+        <!-- 侧边栏 -->
+        <aside class="sidebar flex flex-col" :class="{ 'collapsed': !showSidebar }">
+            <div class="p-4">
+                <input type="text" v-model="searchQuery" placeholder="搜索古诗..." class="w-full bg-stone-100 rounded-xl px-4 py-2 text-sm outline-none">
+            </div>
+            <div class="flex-1 overflow-y-auto px-2">
+                <div v-for="(poems, grade) in groupedLibrary" :key="grade" class="mb-4">
+                    <div class="px-3 py-1 text-[10px] font-bold text-stone-400 uppercase tracking-widest">{{ grade }}</div>
+                    <div v-for="p in poems" :key="p.title" @click="toggleSelect(p)"
+                         class="flex items-center gap-3 p-3 rounded-xl cursor-pointer hover:bg-stone-50 transition"
+                         :class="isSelected(p) ? 'bg-stone-50 ring-1 ring-stone-200' : ''">
+                        <input type="checkbox" :checked="isSelected(p)" class="checkbox-custom" @click.stop="toggleSelect(p)">
+                        <div class="flex-1 overflow-hidden">
+                            <div class="text-sm font-bold text-stone-700 truncate">{{ p.title }}</div>
+                            <div class="text-[10px] text-stone-400 flex justify-between">
+                                <span>{{ p.author }}</span>
+                                <span v-if="records[p.title]" class="text-emerald-600 ml-2">🏆{{ records[p.title].toFixed(1) }}s</span>
+                            </div>
+                        </div>
+                        <button v-if="!p.builtin" @click.stop="deletePoem(p)"
+                            class="text-stone-300 active:text-red-400 text-base flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full hover:bg-red-50 hover:text-red-400 transition" title="删除">✕</button>
+                        <div v-else class="w-6 flex-shrink-0"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="p-4 border-t">
+                <button @click="showImportTip = true" class="w-full bg-stone-800 text-white py-3 rounded-xl text-xs font-bold">导入本地库</button>
+                <input type="file" ref="fileInput" accept=".txt" class="hidden" @change="handleFileUpload">
+            </div>
+        </aside>
+
+        <!-- 主内容区 -->
+        <div class="content-area">
+            <header class="flex justify-between items-center p-4">
+                <div class="flex items-center gap-2 flex-wrap">
+                    <button @click="showSidebar = !showSidebar" class="p-2 bg-white rounded-lg shadow-sm text-xs font-bold text-stone-500">
+                        {{ showSidebar ? '收起' : '展开' }}
+                    </button>
+                    
+                    <!-- 舒尔特模式切换 -->
+                    <div v-if="gameMode === 'schulte'" class="flex bg-white rounded-lg p-1 shadow-sm ml-2">
+                        <button v-for="m in schulteModes" :key="m.id" @click="schulteMode = m.id"
+                                :class="schulteMode === m.id ? 'bg-stone-800 text-white' : 'text-stone-400'"
+                                class="px-3 py-1 rounded-md text-[10px] transition font-bold">
+                            {{ m.name }}
+                        </button>
+                    </div>
+
+                    <!-- 连线模式工具栏：画笔 + 橡皮擦 -->
+                    <div v-if="gameMode === 'connect'" class="flex items-center bg-white rounded-lg p-1 shadow-sm ml-2 gap-1 flex-wrap">
+                        <button @click="drawTool = 'pen'"
+                                :class="drawTool === 'pen' ? 'active' : 'inactive'"
+                                class="tool-btn">
+                            🖊 画笔
+                        </button>
+                        <button @click="drawTool = 'eraser_area'"
+                                :class="drawTool === 'eraser_area' ? 'active' : 'inactive'"
+                                class="tool-btn">
+                            🧹 涂抹
+                        </button>
+                        <button @click="clearCanvas"
+                                class="tool-btn inactive">
+                            🗑 清空
+                        </button>
+                        <div class="flex items-center gap-1 px-1">
+                            <span class="text-[10px] text-stone-400">细</span>
+                            <input type="range" min="0.1" max="5" step="0.1" v-model.number="penSize" class="w-16 accent-stone-500" style="height:4px;">
+                            <span class="text-[10px] text-stone-400">{{ penSize }}</span>
+                        </div>
+                    </div>
+
+                    <div class="flex bg-white rounded-lg p-1 shadow-sm ml-2">
+                        <button @click="trainTarget = 'char'" :class="trainTarget === 'char' ? 'bg-stone-200 text-stone-800' : 'text-stone-400'" class="px-3 py-1 rounded-md text-[10px] font-bold">汉字</button>
+                        <button @click="trainTarget = 'pinyin'" :class="trainTarget === 'pinyin' ? 'bg-stone-200 text-stone-800' : 'text-stone-400'" class="px-3 py-1 rounded-md text-[10px] font-bold">拼音</button>
+                    </div>
+                </div>
+
+                <div class="flex items-center gap-4">
+                    <div class="hidden md:flex gap-2 text-[10px] font-bold">
+                        <button @click="gameMode = 'connect'" :class="gameMode === 'connect' ? 'text-stone-800' : 'text-stone-300'">连线</button>
+                        <button @click="gameMode = 'schulte'" :class="gameMode === 'schulte' ? 'text-stone-800' : 'text-stone-300'">舒尔特</button>
+                    </div>
+                    <div class="font-mono text-2xl text-stone-400">{{ timer.toFixed(1) }}s</div>
+                    <button @click="reGenerate" class="p-2 bg-stone-100 rounded-full hover:rotate-180 transition-transform duration-500">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>
+                    </button>
+                    <button @click="isMuted = !isMuted" class="text-xl opacity-60">{{ isMuted ? '🔇' : '🍃' }}</button>
+                </div>
+            </header>
+
+            <main class="flex-1 relative m-4 rounded-[2rem] bg-stone-50/50 border border-stone-100 overflow-hidden" ref="gameBox">
+                <!-- 舒尔特模式 -->
+                <div v-if="gameMode === 'schulte'" class="w-full h-full p-4 flex items-center justify-center">
+                    <div class="schulte-grid" :style="gridStyle">
+                        <div v-for="cell in schulteData" :key="cell.uniqueId" 
+                             @click="handleCellClick(cell)"
+                             :class="[
+                                'schulte-cell', 
+                                (cell.state === 'correct' && schulteMode === 'color') ? 'cell-correct-color' : '',
+                                (cell.state === 'correct' && schulteMode === 'vanish') ? 'cell-vanished' : ''
+                             ]"
+                             :style="{ fontSize: dynamicFontSize + 'px' }">
+                            {{ trainTarget === 'char' ? cell.char : cell.pinyin }}
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 连线模式 -->
+                <div v-if="gameMode === 'connect'" class="w-full h-full relative">
+                    <canvas ref="drawCanvas" 
+                        class="absolute inset-0 z-10 w-full h-full"
+                        :class="drawTool === 'pen' ? 'pen-cursor' : 'eraser-cursor'"
+                        @mousedown="startDraw" @mousemove="onDraw" @mouseup="stopDraw"
+                        @touchstart.prevent="startDraw" @touchmove.prevent="onDraw" @touchend.prevent="stopDraw"></canvas>
+                    <div v-for="item in scatterData" :key="item.uniqueId" class="scatter-item" :style="{ left: item.x + 'px', top: item.y + 'px' }">
+                        <span class="scatter-text">{{ trainTarget === 'char' ? item.char : item.pinyin }}</span>
+                        <div class="scatter-dot"></div>
+                    </div>
+                </div>
+
+                <!-- 结算页 -->
+                <div v-if="isFinished" class="finish-overlay" @click="reGenerate">
+                    <div class="zen-card">
+                        <div class="zen-title">{{ finishPhrase.main }}</div>
+                        <div class="zen-subtitle">{{ finishPhrase.sub }}</div>
+                        <div class="text-stone-400 text-sm font-light mt-2">用时 {{ timer.toFixed(1) }}s</div>
+                        <div class="mt-8 text-xs text-stone-300 tracking-widest">点击此处 重新开始</div>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+        createApp({
+            setup() {
+                const showSidebar = ref(window.innerWidth > 768);
+                const gameMode = ref('schulte');
+                const schulteMode = ref('color');
+                const trainTarget = ref('char');
+                const searchQuery = ref("");
+                const isMuted = ref(false);
+                const showImportTip = ref(false);
+                const timer = ref(0);
+                const isRunning = ref(false);
+                const isFinished = ref(false);
+                const records = ref(JSON.parse(localStorage.getItem('poem_records') || '{}'));
+                const fileInput = ref(null);
+                const drawTool = ref('pen'); // 'pen' | 'eraser_area'
+                const penSize = ref(3); // 画笔粗细 1-20
+                let timerInterval = null;
+
+                // ── 结束语池 ──────────────────────────────────────────────
+                const zenPhrases = [
+                    { main: "气定神闲，得鱼忘筌", sub: "专注已成，诗意长存" },
+                    { main: "心如止水，澄澈无尘", sub: "静中求定，定中生慧" },
+                    { main: "凝神聚气，妙手天成", sub: "一念专注，万象皆明" },
+                    { main: "宁静致远，厚积薄发", sub: "心无旁骛，方得始终" },
+                    { main: "浮云散尽，明月自来", sub: "专注如禅，当下即是" },
+                    { main: "行云流水，自在从容", sub: "心随诗走，意在笔先" },
+                    { main: "千磨万击还坚劲", sub: "专注是通往卓越的路" },
+                    { main: "不疾而速，无为而成", sub: "专注胜过一切努力" },
+                    { main: "守静笃，致虚极", sub: "归于宁静，万物归根" },
+                    { main: "滴水穿石，非力使然", sub: "专注与坚持终能致远" },
+                    { main: "目无旁骛，一以贯之", sub: "此刻的你，已超越昨日" },
+                    { main: "鸢飞戾天，鱼跃于渊", sub: "心思入境，天地皆宽" },
+                    { main: "博观而约取，厚积而薄发", sub: "每一次专注都是积累" },
+                    { main: "洗尽铅华，见素抱朴", sub: "专注让内心愈发清澈" },
+                    { main: "潜龙勿用，时机待定", sub: "沉静蓄力，终将腾飞" },
+                ];
+                const finishPhrase = ref(zenPhrases[0]);
+
+                const schulteModes = [
+                    { id: 'keep', name: '常驻' },
+                    { id: 'color', name: '变色' },
+                    { id: 'vanish', name: '消失' }
+                ];
+
+                const poemLibrary = ref([
+                    { grade: "基础", title: "咏鹅", dynasty: "唐", author: "骆宾王", content: "鹅鹅鹅曲项向天歌白毛浮绿水红掌拨清波", dynastyP: "táng", authorP: "luò,bīn,wáng", contentP: "é,é,é,qū,xiàng,xiàng,tiān,gē,bái,máo,fú,lǜ,shuǐ,hóng,zhǎng,bō,qīng,bō", builtin: true }
+                ]);
+
+                const selectedPoems = ref([poemLibrary.value[0]]);
+                const scatterData = ref([]);
+                const schulteData = ref([]);
+                const currentIndex = ref(0);
+                const gameBox = ref(null);
+                const drawCanvas = ref(null);
+                let audioCtx = null;
+
+                // ── 音效：低频治愈系 ─────────────────────────────────────
+                const playZenSound = (mode) => {
+                    if (isMuted.value) return;
+                    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const now = audioCtx.currentTime;
+
+                    if (mode === 'keep') {
+                        // 常驻：低频厚实木鱼，双音叠加音量饱满，低频治愈
+                        const osc1 = audioCtx.createOscillator();
+                        const osc2 = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc1.connect(gain); osc2.connect(gain); gain.connect(audioCtx.destination);
+                        osc1.type = 'sine'; osc1.frequency.value = 160;
+                        osc2.type = 'sine'; osc2.frequency.value = 80; // 低八度加厚
+                        gain.gain.setValueAtTime(0.45, now);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+                        osc1.start(now); osc1.stop(now + 0.9);
+                        osc2.start(now); osc2.stop(now + 0.9);
+
+                    } else if (mode === 'color') {
+                        // 变色：低频钵声，参考消失模式，略长余韵
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.connect(gain); gain.connect(audioCtx.destination);
+                        osc.type = 'sine'; osc.frequency.value = 240;
+                        gain.gain.setValueAtTime(0.2, now);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.9);
+                        osc.start(now); osc.stop(now + 0.9);
+
+                    } else if (mode === 'vanish') {
+                        // 磬声消散：中低频，缓慢衰退
+                        const osc = audioCtx.createOscillator();
+                        const gain = audioCtx.createGain();
+                        osc.connect(gain); gain.connect(audioCtx.destination);
+                        osc.type = 'sine'; osc.frequency.value = 280;
+                        gain.gain.setValueAtTime(0.2, now);
+                        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.8);
+                        osc.start(now); osc.stop(now + 0.8);
+
+                    } else if (mode === 'win') {
+                        // 结束合弦：低频纯五度，宁静感
+                        const chords = [110, 165, 220, 330]; // A2, E3, A3, E4
+                        chords.forEach((f, i) => {
+                            const o = audioCtx.createOscillator();
+                            const g = audioCtx.createGain();
+                            o.connect(g); g.connect(audioCtx.destination);
+                            o.type = 'sine'; o.frequency.value = f;
+                            g.gain.setValueAtTime(0.0, now + i * 0.08);
+                            g.gain.linearRampToValueAtTime(0.12, now + i * 0.08 + 0.05);
+                            g.gain.exponentialRampToValueAtTime(0.001, now + 2.5);
+                            o.start(now + i * 0.08);
+                            o.stop(now + 2.5);
+                        });
+                        return;
+                    }
+                };
+
+                const combinedSequence = computed(() => {
+                    let fullArr = [];
+                    selectedPoems.value.forEach(poem => {
+                        const chars = (poem.dynasty + poem.author + poem.content).split('');
+                        const pinyins = (poem.dynastyP + ',' + poem.authorP + ',' + poem.contentP).split(',');
+                        chars.forEach((char, i) => fullArr.push({ char, pinyin: pinyins[i] || '', title: poem.title }));
+                    });
+                    return fullArr.map((item, index) => ({ ...item, uniqueId: index }));
+                });
+
+                const reGenerate = () => {
+                    currentIndex.value = 0; timer.value = 0; isRunning.value = false; isFinished.value = false;
+                    clearInterval(timerInterval);
+                    // 随机选取结束语
+                    finishPhrase.value = zenPhrases[Math.floor(Math.random() * zenPhrases.length)];
+                    const boxW = gameBox.value.clientWidth;
+                    const boxH = gameBox.value.clientHeight;
+
+                    schulteData.value = [...combinedSequence.value].sort(() => Math.random() - 0.5).map(item => ({ ...item, state: 'default' }));
+                    
+                    const positions = [];
+                    combinedSequence.value.forEach(() => {
+                        let x, y, tooClose, attempts = 0;
+                        do {
+                            x = 60 + Math.random() * (boxW - 120);
+                            y = 60 + Math.random() * (boxH - 120);
+                            tooClose = positions.some(p => Math.hypot(p.x - x, p.y - y) < 50);
+                            attempts++;
+                        } while (tooClose && attempts < 50);
+                        positions.push({ x, y });
+                    });
+                    scatterData.value = combinedSequence.value.map((item, i) => ({ ...item, ...positions[i] }));
+
+                    nextTick(() => {
+                        if (drawCanvas.value) {
+                            drawCanvas.value.width = boxW;
+                            drawCanvas.value.height = boxH;
+                        }
+                    });
+                };
+
+                const handleCellClick = (cell) => {
+                    if (cell.state === 'correct' || isFinished.value) return;
+                    const target = combinedSequence.value[currentIndex.value];
+                    const isCorrect = (trainTarget.value === 'char') ? (cell.char === target.char) : (cell.pinyin === target.pinyin);
+                    
+                    if (isCorrect) {
+                        playZenSound(schulteMode.value);
+                        if (!isRunning.value) {
+                            isRunning.value = true;
+                            const start = Date.now();
+                            timerInterval = setInterval(() => timer.value = (Date.now() - start) / 1000, 100);
+                        }
+                        cell.state = 'correct';
+                        currentIndex.value++;
+
+                        if (currentIndex.value === combinedSequence.value.length) {
+                            clearInterval(timerInterval);
+                            isFinished.value = true;
+                            playZenSound('win');
+                            const pTitle = selectedPoems.value[0].title;
+                            if (!records.value[pTitle] || timer.value < records.value[pTitle]) {
+                                records.value[pTitle] = timer.value;
+                                localStorage.setItem('poem_records', JSON.stringify(records.value));
+                            }
+                        }
+                    }
+                };
+
+                const manualImportText = ref('');
+
+                const parseAndAddLines = (text) => {
+                    let count = 0;
+                    text.split('\n').forEach(line => {
+                        const [grade, title, dynasty, author, content, dp, ap, cp] = line.trim().split('|');
+                        if (grade && title && !poemLibrary.value.find(p => p.title === title)) {
+                            poemLibrary.value.push({ grade, title, dynasty, author, content, dynastyP: dp, authorP: ap, contentP: cp });
+                            count++;
+                        }
+                    });
+                    return count;
+                };
+
+                const handleManualImport = () => {
+                    const count = parseAndAddLines(manualImportText.value);
+                    manualImportText.value = '';
+                    showImportTip.value = false;
+                    alert(`导入成功，共 ${count} 首`);
+                };
+
+                const handleFileUpload = (e) => {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const count = parseAndAddLines(ev.target.result);
+                        showImportTip.value = false;
+                        alert(`导入成功，共 ${count} 首`);
+                    };
+                    reader.readAsText(file);
+                };
+
+                const deletePoem = (p) => {
+                    if (p.builtin) return;
+                    if (!confirm(`确认删除《${p.title}》？`)) return;
+                    poemLibrary.value = poemLibrary.value.filter(item => item.title !== p.title);
+                    if (selectedPoems.value[0].title === p.title) {
+                        selectedPoems.value = [poemLibrary.value[0]];
+                        reGenerate();
+                    }
+                };
+
+                // ── 画布逻辑（含橡皮擦） ─────────────────────────────────
+                let isDrawing = false;
+                let lastPoint = null;
+
+                const getPoint = (e) => {
+                    const rect = drawCanvas.value.getBoundingClientRect();
+                    const scaleX = drawCanvas.value.width / rect.width;
+                    const scaleY = drawCanvas.value.height / rect.height;
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    return {
+                        x: (clientX - rect.left) * scaleX,
+                        y: (clientY - rect.top) * scaleY
+                    };
+                };
+
+                const startDraw = (e) => {
+                    if (gameMode.value !== 'connect' || isFinished.value) return;
+                    isDrawing = true;
+                    const pt = getPoint(e);
+                    lastPoint = pt;
+                    if (drawTool.value === 'pen') {
+                        const ctx = drawCanvas.value.getContext('2d');
+                        ctx.beginPath();
+                        ctx.moveTo(pt.x, pt.y);
+                    }
+                };
+
+                const onDraw = (e) => {
+                    if (!isDrawing || !drawCanvas.value) return;
+                    const ctx = drawCanvas.value.getContext('2d');
+                    const pt = getPoint(e);
+
+                    if (drawTool.value === 'pen') {
+                        ctx.strokeStyle = '#8DA47E';
+                        ctx.lineWidth = penSize.value;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        ctx.lineTo(pt.x, pt.y);
+                        ctx.stroke();
+                    } else if (drawTool.value === 'eraser_area') {
+                        // 涂抹橡皮擦：沿路径清除一定宽度
+                        ctx.save();
+                        ctx.globalCompositeOperation = 'destination-out';
+                        ctx.strokeStyle = 'rgba(0,0,0,1)';
+                        ctx.lineWidth = 28;
+                        ctx.lineCap = 'round';
+                        ctx.lineJoin = 'round';
+                        if (lastPoint) {
+                            ctx.beginPath();
+                            ctx.moveTo(lastPoint.x, lastPoint.y);
+                            ctx.lineTo(pt.x, pt.y);
+                            ctx.stroke();
+                        }
+                        ctx.restore();
+                    }
+                    lastPoint = pt;
+                };
+
+                const stopDraw = () => { isDrawing = false; lastPoint = null; };
+
+                const clearCanvas = () => {
+                    if (!drawCanvas.value) return;
+                    const ctx = drawCanvas.value.getContext('2d');
+                    ctx.clearRect(0, 0, drawCanvas.value.width, drawCanvas.value.height);
+                };
+
+                onMounted(() => {
+                    reGenerate();
+                    window.addEventListener('resize', () => {
+                        showSidebar.value = window.innerWidth > 768;
+                        reGenerate();
+                    });
+                });
+
+                return {
+                    showSidebar, gameMode, schulteMode, schulteModes, trainTarget, searchQuery, isMuted, showImportTip, timer, isFinished,
+                    drawTool, penSize, finishPhrase, manualImportText,
+                    groupedLibrary: computed(() => {
+                        const groups = {};
+                        poemLibrary.value.filter(p => p.title.includes(searchQuery.value)).forEach(p => {
+                            if (!groups[p.grade]) groups[p.grade] = [];
+                            groups[p.grade].push(p);
+                        });
+                        return groups;
+                    }),
+                    selectedPoems, scatterData, schulteData, gameBox, drawCanvas, fileInput, records,
+                    isSelected: (p) => selectedPoems.value[0].title === p.title,
+                    toggleSelect: (p) => { selectedPoems.value = [p]; reGenerate(); },
+                    reGenerate, handleFileUpload, handleManualImport, deletePoem,
+                    triggerFileInput: () => { fileInput.value.click(); },
+                    handleCellClick, startDraw, onDraw, stopDraw, clearCanvas,
+                    gridStyle: computed(() => ({ gridTemplateColumns: `repeat(${Math.ceil(Math.sqrt(schulteData.value.length))}, 1fr)` })),
+                    dynamicFontSize: computed(() => schulteData.value.length < 20 ? 28 : (schulteData.value.length < 40 ? 20 : 14))
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
