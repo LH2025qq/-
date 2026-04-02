@@ -148,9 +148,11 @@
                     </div>
                 </div>
 
-                <div v-if="gameMode === 'connect'" class="w-full h-full relative">
-                    <canvas ref="drawCanvas" class="absolute inset-0 z-10 w-full h-full" @mousedown="startDraw" @mousemove="onDraw" @mouseup="stopDraw" @touchstart.prevent="startDraw" @touchmove.prevent="onDraw" @touchend.prevent="stopDraw"></canvas>
-                    <div v-for="item in scatterData" :key="item.uniqueId" class="scatter-item" :style="{ left: item.x + 'px', top: item.y + 'px' }">
+                <div v-if="gameMode === 'connect'" class="w-full h-full relative"
+                     @mousedown="startDraw" @mousemove="onDraw" @mouseup="stopDraw" @mouseleave="stopDraw"
+                     @touchstart.prevent="startDraw" @touchmove.prevent="onDraw" @touchend.prevent="stopDraw">
+                    <canvas ref="drawCanvas" class="absolute inset-0 w-full h-full" style="z-index:5;"></canvas>
+                    <div v-for="item in scatterData" :key="item.uniqueId" class="scatter-item" style="z-index:10;" :style="{ left: item.x + 'px', top: item.y + 'px' }">
                         <span class="scatter-text">{{ trainTarget === 'char' ? item.char : item.pinyin }}</span><div class="scatter-dot"></div>
                     </div>
                 </div>
@@ -207,30 +209,32 @@
                 const playZenSound = (mode) => {
                     if (isMuted.value) return;
                     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                    if (audioCtx.state === 'suspended') audioCtx.resume();
-                    const now = audioCtx.currentTime;
-
-                    if (mode === 'keep') { // 木鱼声
-                        const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator(), g = audioCtx.createGain();
-                        o1.connect(g); o2.connect(g); g.connect(audioCtx.destination);
-                        o1.frequency.value = 160; o2.frequency.value = 80; g.gain.setValueAtTime(0.4, now);
-                        g.gain.exponentialRampToValueAtTime(0.001, now + 0.9); o1.start(now); o2.start(now); o1.stop(now + 0.9); o2.stop(now + 0.9);
-                    } else if (mode === 'color') { // 钵声
-                        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-                        o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 240;
-                        g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.9); o.start(now); o.stop(now + 0.9);
-                    } else if (mode === 'vanish') { // 磬声
-                        const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-                        o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 280;
-                        g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.8); o.start(now); o.stop(now + 0.8);
-                    } else if (mode === 'win') { // 成功音
-                        [110, 165, 220, 330].forEach((f, i) => {
+                    const _play = () => {
+                        const now = audioCtx.currentTime;
+                        if (mode === 'keep') {
+                            const o1 = audioCtx.createOscillator(), o2 = audioCtx.createOscillator(), g = audioCtx.createGain();
+                            o1.connect(g); o2.connect(g); g.connect(audioCtx.destination);
+                            o1.frequency.value = 160; o2.frequency.value = 80; g.gain.setValueAtTime(0.4, now);
+                            g.gain.exponentialRampToValueAtTime(0.001, now + 0.9); o1.start(now); o2.start(now); o1.stop(now + 0.9); o2.stop(now + 0.9);
+                        } else if (mode === 'color') {
                             const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-                            o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f;
-                            g.gain.setValueAtTime(0.0, now + i * 0.08); g.gain.linearRampToValueAtTime(0.12, now + i * 0.08 + 0.05);
-                            g.gain.exponentialRampToValueAtTime(0.001, now + 2.5); o.start(now + i * 0.08); o.stop(now + 2.5);
-                        });
-                    }
+                            o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 240;
+                            g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.9); o.start(now); o.stop(now + 0.9);
+                        } else if (mode === 'vanish') {
+                            const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                            o.connect(g); g.connect(audioCtx.destination); o.frequency.value = 280;
+                            g.gain.setValueAtTime(0.2, now); g.gain.exponentialRampToValueAtTime(0.001, now + 0.8); o.start(now); o.stop(now + 0.8);
+                        } else if (mode === 'win') {
+                            [110, 165, 220, 330].forEach((f, i) => {
+                                const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+                                o.connect(g); g.connect(audioCtx.destination); o.frequency.value = f;
+                                g.gain.setValueAtTime(0.0, now + i * 0.08); g.gain.linearRampToValueAtTime(0.12, now + i * 0.08 + 0.05);
+                                g.gain.exponentialRampToValueAtTime(0.001, now + 2.5); o.start(now + i * 0.08); o.stop(now + 2.5);
+                            });
+                        }
+                    };
+                    // iOS/Android: 若 context 被挂起则先 resume 再播放
+                    if (audioCtx.state === 'suspended') { audioCtx.resume().then(_play); } else { _play(); }
                 };
 
                 const combinedSequence = computed(() => {
@@ -257,7 +261,9 @@
                         pos.push({ x, y });
                     });
                     scatterData.value = combinedSequence.value.map((item, i) => ({ ...item, ...pos[i] }));
-                    nextTick(() => { if (drawCanvas.value) { drawCanvas.value.width = boxW; drawCanvas.value.height = boxH; } });
+                    nextTick(() => {
+                        if (drawCanvas.value) initCanvas();
+                    });
                 };
 
                 const handleCellClick = (cell) => {
@@ -277,18 +283,48 @@
                     }
                 };
 
+                // 将事件坐标正确映射到 canvas 像素坐标（修复 CSS尺寸 vs 物理尺寸 偏移问题）
+                const getCanvasPoint = (e) => {
+                    const cv = drawCanvas.value, rect = cv.getBoundingClientRect();
+                    const scaleX = cv.width / rect.width, scaleY = cv.height / rect.height;
+                    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                    return { x: (clientX - rect.left) * scaleX, y: (clientY - rect.top) * scaleY };
+                };
+
+                // 初始化 canvas 尺寸，保持透明（canvas 在文字下层，destination-out 只擦笔迹自身像素）
+                const initCanvas = () => {
+                    if (!drawCanvas.value) return;
+                    const rect = drawCanvas.value.getBoundingClientRect();
+                    const w = rect.width > 0 ? rect.width : gameBox.value.clientWidth;
+                    const h = rect.height > 0 ? rect.height : gameBox.value.clientHeight;
+                    drawCanvas.value.width = w;
+                    drawCanvas.value.height = h;
+                };
+
                 const startDraw = (e) => {
                     if (gameMode.value !== 'connect' || isFinished.value) return;
+                    // 只在 canvas 尚未初始化（默认300x150）时才重新初始化，避免清空笔迹
+                    if (drawCanvas.value.width <= 300 && drawCanvas.value.height <= 150) initCanvas();
                     isDrawing = true;
-                    const rect = drawCanvas.value.getBoundingClientRect(), pt = { x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left, y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top };
-                    lastPoint = pt; if (drawTool.value === 'pen') { const ctx = drawCanvas.value.getContext('2d'); ctx.beginPath(); ctx.moveTo(pt.x, pt.y); }
+                    const pt = getCanvasPoint(e);
+                    lastPoint = pt;
+                    if (drawTool.value === 'pen') { const ctx = drawCanvas.value.getContext('2d'); ctx.beginPath(); ctx.moveTo(pt.x, pt.y); }
                 };
 
                 const onDraw = (e) => {
                     if (!isDrawing) return;
-                    const ctx = drawCanvas.value.getContext('2d'), rect = drawCanvas.value.getBoundingClientRect(), pt = { x: (e.touches ? e.touches[0].clientX : e.clientX) - rect.left, y: (e.touches ? e.touches[0].clientY : e.clientY) - rect.top };
-                    if (drawTool.value === 'pen') { ctx.strokeStyle = '#8DA47E'; ctx.lineWidth = penSize.value; ctx.lineCap = 'round'; ctx.lineTo(pt.x, pt.y); ctx.stroke(); } 
-                    else { ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 30; ctx.lineCap = 'round'; ctx.beginPath(); ctx.moveTo(lastPoint.x, lastPoint.y); ctx.lineTo(pt.x, pt.y); ctx.stroke(); ctx.restore(); }
+                    const ctx = drawCanvas.value.getContext('2d');
+                    const pt = getCanvasPoint(e);
+                    if (drawTool.value === 'pen') {
+                        ctx.strokeStyle = '#8DA47E'; ctx.lineWidth = penSize.value; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                        ctx.lineTo(pt.x, pt.y); ctx.stroke();
+                    } else {
+                        // destination-out 只擦 canvas 自身像素，不影响下层 HTML 文字
+                        // canvas 有背景色填充，擦出的是背景色而非透明
+                        ctx.save(); ctx.globalCompositeOperation = 'destination-out'; ctx.lineWidth = 30; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+                        ctx.beginPath(); ctx.moveTo(lastPoint.x, lastPoint.y); ctx.lineTo(pt.x, pt.y); ctx.stroke(); ctx.restore();
+                    }
                     lastPoint = pt;
                 };
 
@@ -315,6 +351,22 @@
 
                 onMounted(() => {
                     reGenerate();
+
+                    // iOS Safari / Android Chrome: 首次触摸时预热解锁 AudioContext
+                    const unlockAudio = () => {
+                        if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                        if (audioCtx.state === 'suspended') {
+                            audioCtx.resume().then(() => {
+                                // 播放一帧无声缓冲，彻底激活 context
+                                const buf = audioCtx.createBuffer(1, 1, 22050);
+                                const src = audioCtx.createBufferSource();
+                                src.buffer = buf; src.connect(audioCtx.destination); src.start(0);
+                            });
+                        }
+                    };
+                    document.addEventListener('touchstart', unlockAudio, { once: true, passive: true });
+                    document.addEventListener('mousedown', unlockAudio, { once: true });
+
                     window.addEventListener('resize', () => {
                         showSidebar.value = window.innerWidth > 768;
                         reGenerate();
@@ -324,7 +376,7 @@
                 return {
                     showSidebar, gameMode, schulteMode, schulteModes, trainTarget, searchQuery, isMuted, showImportTip, timer, isFinished, drawTool, penSize, finishPhrase, manualImportText, poemLibrary, selectedPoems, schulteData, scatterData, gameBox, drawCanvas, fileInput, detailPoem, bestRecords,
                     handleTouchStart: (cell) => handleCellClick(cell), handleCellClick, reGenerate, handleManualImport, deletePoem: (p) => { if(!p.builtin && confirm('确定删除吗？')) poemLibrary.value = poemLibrary.value.filter(item => item.title !== p.title); },
-                    triggerFileInput: () => fileInput.value.click(), stopDraw: () => { isDrawing = false; }, startDraw, onDraw, clearCanvas: () => { const ctx = drawCanvas.value.getContext('2d'); ctx.clearRect(0,0,drawCanvas.value.width,drawCanvas.value.height); },
+                    triggerFileInput: () => fileInput.value.click(), stopDraw: () => { isDrawing = false; }, startDraw, onDraw, clearCanvas: () => { const cv = drawCanvas.value, ctx = cv.getContext('2d'); ctx.clearRect(0, 0, cv.width, cv.height); },
                     isSelected: (p) => selectedPoems.value[0].title === p.title, toggleSelect: (p) => { selectedPoems.value = [p]; reGenerate(); },
                     handleFileUpload,
                     groupedLibrary: computed(() => { const g = {}; poemLibrary.value.filter(p => p.title.includes(searchQuery.value)).forEach(p => { if (!g[p.grade]) g[p.grade] = []; g[p.grade].push(p); }); return g; }),
